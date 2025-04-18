@@ -1,9 +1,12 @@
 ﻿using Microsoft.Extensions.Configuration;
 using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.Processing;
+using SixLabors.ImageSharp.Processing;               // for image.Mutate
+using SixLabors.ImageSharp.Drawing.Processing;       // for DrawText, DrawingOptions, RichTextOptions
+using SixLabors.Fonts;                               // for Font, SystemFonts
 using MongoDB.Bson;
 using MongoDB.Driver;
 using Azure.Storage.Blobs;
+using Path = System.IO.Path;
 
 const string imagesPath =
     @"C:\Users\adamh\Transfers\Exports\attie.co\MarshCreek\";
@@ -49,10 +52,12 @@ var firstImageExtension = Path.GetExtension(firstImageFile).TrimStart('.').ToLow
 var filter = Builders<BsonDocument>.Filter.Eq("gallery", galleryName);
 await collection.DeleteManyAsync(filter);
 
-// For each image in the folder, crop it to a square and save it as a webp
+// For each image in the folder, crop it to a square, add reference number with a border, and save it as a webp
 foreach (var file in Directory.EnumerateFiles(imagesPath, $"*.{firstImageExtension}", SearchOption.TopDirectoryOnly))
 {
     using var image = Image.Load(file);
+
+    var referenceNo = Guid.NewGuid().ToString("N")[..5];
 
     var width = image.Width;
     var height = image.Height;
@@ -62,6 +67,28 @@ foreach (var file in Directory.EnumerateFiles(imagesPath, $"*.{firstImageExtensi
     var newStartX = (width - newWidth) / 2;
     var newStartY = (height - newHeight) / 2;
 
+    // Add reference number as text with a black border on the bottom-right corner of the original image
+    var font = SystemFonts.CreateFont("Arial", 24, FontStyle.Bold);
+    var textSize = TextMeasurer.MeasureBounds(referenceNo, new TextOptions(font)).Size;
+    var location = new PointF(width - textSize.X - 10, height - textSize.Y - 10); // Bottom-right with padding
+
+    image.Mutate(ctx =>
+    {
+        // Draw the border (black text slightly offset in all directions)
+        ctx.DrawText(referenceNo, font, Color.Black, new PointF(location.X - 1, location.Y - 1));
+        ctx.DrawText(referenceNo, font, Color.Black, new PointF(location.X + 1, location.Y - 1));
+        ctx.DrawText(referenceNo, font, Color.Black, new PointF(location.X - 1, location.Y + 1));
+        ctx.DrawText(referenceNo, font, Color.Black, new PointF(location.X + 1, location.Y + 1));
+
+        // Draw the main text (white text on top)
+        ctx.DrawText(referenceNo, font, Color.White, location);
+    });
+
+    // Overwrite the original image with the new image
+    image.Save(file);
+    Console.WriteLine($"Saved image with reference number: {referenceNo}");
+
+    // Crop the image to a square
     var rectangle = new Rectangle(newStartX, newStartY, newWidth, newHeight);
     image.Mutate(x => x.Crop(rectangle));
 
@@ -74,7 +101,7 @@ foreach (var file in Directory.EnumerateFiles(imagesPath, $"*.{firstImageExtensi
     var document = new BsonDocument
     {
         { "filename", Path.GetFileName(outputFilePath) },
-        { "id", Guid.NewGuid().ToString("N")[..5] },
+        { "ref",  referenceNo },
         { "gallery", galleryName }
     };
     collection.InsertOne(document);
