@@ -1,8 +1,5 @@
 ﻿using Microsoft.Extensions.Configuration;
 using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.Processing;               // for image.Mutate
-using SixLabors.ImageSharp.Drawing.Processing;       // for DrawText, DrawingOptions, RichTextOptions
-using SixLabors.Fonts;                               // for Font, SystemFonts
 using Azure.Storage.Blobs;
 using Path = System.IO.Path;
 using AttiePhotoUploader;
@@ -10,7 +7,7 @@ using AttiePhotoUploader;
 const string imagesPath =
     @"C:\Users\adamh\Transfers\Exports\attie.co\";
 
-const string galleryName = "marsh-creek";
+const string galleryName = "dwest-basketball-2025-senior-night";
 
 // Build configuration to retrieve secrets
 var configuration = new ConfigurationBuilder()
