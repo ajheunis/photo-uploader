@@ -3,13 +3,12 @@ using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Processing;               // for image.Mutate
 using SixLabors.ImageSharp.Drawing.Processing;       // for DrawText, DrawingOptions, RichTextOptions
 using SixLabors.Fonts;                               // for Font, SystemFonts
-using MongoDB.Bson;
-using MongoDB.Driver;
 using Azure.Storage.Blobs;
 using Path = System.IO.Path;
+using AttiePhotoUploader;
 
 const string imagesPath =
-    @"C:\Users\adamh\Transfers\Exports\attie.co\MarshCreek\";
+    @"C:\Users\adamh\Transfers\Exports\attie.co\";
 
 const string galleryName = "marsh-creek";
 
@@ -17,18 +16,6 @@ const string galleryName = "marsh-creek";
 var configuration = new ConfigurationBuilder()
     .AddUserSecrets<Program>() // Load secrets from user secrets
     .Build();
-
-// Retrieve MongoDB connection string from secrets
-var connectionString = configuration["MongoDbConnectionString"];
-if (string.IsNullOrEmpty(connectionString))
-{
-    throw new InvalidOperationException("MongoDB connection string is not set in the user secrets.");
-}
-
-// Initialize MongoDB client and collection
-var client = new MongoClient(connectionString);
-var database = client.GetDatabase("attieco");
-var collection = database.GetCollection<BsonDocument>("images");
 
 string thumbnailsPath = Path.Combine(imagesPath, "thumbnails");
 Directory.CreateDirectory(thumbnailsPath);
@@ -42,69 +29,12 @@ if (Directory.Exists(thumbnailsPath))
     }
 }
 
-// Find out the extension of the first image in the folder
-var firstImageFile = Directory.EnumerateFiles(imagesPath, "*.*", SearchOption.TopDirectoryOnly).FirstOrDefault() ??
-    throw new FileNotFoundException("No images found in the specified folder.");
-
-var firstImageExtension = Path.GetExtension(firstImageFile).TrimStart('.').ToLowerInvariant();
-
-// Delete all the Documents in the collection that have the same gallery name
-var filter = Builders<BsonDocument>.Filter.Eq("gallery", galleryName);
-await collection.DeleteManyAsync(filter);
-
-// For each image in the folder, crop it to a square, add reference number with a border, and save it as a webp
-foreach (var file in Directory.EnumerateFiles(imagesPath, $"*.{firstImageExtension}", SearchOption.TopDirectoryOnly))
+var counter = 0;
+// For each image in the folder, process it using ThumbnailProcessor
+foreach (var file in Directory.EnumerateFiles(imagesPath, $"*.png", SearchOption.TopDirectoryOnly))
 {
-    using var image = Image.Load(file);
-
-    var referenceNo = Guid.NewGuid().ToString("N")[..5];
-
-    var width = image.Width;
-    var height = image.Height;
-
-    var newWidth = Math.Min(width, height);
-    var newHeight = Math.Min(width, height);
-    var newStartX = (width - newWidth) / 2;
-    var newStartY = (height - newHeight) / 2;
-
-    // Add reference number as text with a black border on the bottom-right corner of the original image
-    var font = SystemFonts.CreateFont("Arial", 24, FontStyle.Bold);
-    var textSize = TextMeasurer.MeasureBounds(referenceNo, new TextOptions(font)).Size;
-    var location = new PointF(width - textSize.X - 10, height - textSize.Y - 10); // Bottom-right with padding
-
-    image.Mutate(ctx =>
-    {
-        // Draw the border (black text slightly offset in all directions)
-        ctx.DrawText(referenceNo, font, Color.Black, new PointF(location.X - 1, location.Y - 1));
-        ctx.DrawText(referenceNo, font, Color.Black, new PointF(location.X + 1, location.Y - 1));
-        ctx.DrawText(referenceNo, font, Color.Black, new PointF(location.X - 1, location.Y + 1));
-        ctx.DrawText(referenceNo, font, Color.Black, new PointF(location.X + 1, location.Y + 1));
-
-        // Draw the main text (white text on top)
-        ctx.DrawText(referenceNo, font, Color.White, location);
-    });
-
-    // Overwrite the original image with the new image
-    image.Save(file);
-    Console.WriteLine($"Saved image with reference number: {referenceNo}");
-
-    // Crop the image to a square
-    var rectangle = new Rectangle(newStartX, newStartY, newWidth, newHeight);
-    image.Mutate(x => x.Crop(rectangle));
-
-    // Save the cropped image as a thumbnail locally
-    var outputFilePath = Path.Combine(thumbnailsPath, Path.GetFileNameWithoutExtension(file) + ".webp");
-    image.SaveAsWebp(outputFilePath);
-    Console.WriteLine($"Saved thumbnail locally: {outputFilePath}");
-
-    // Create MongoDB entry
-    var document = new BsonDocument
-    {
-        { "filename", Path.GetFileName(outputFilePath) },
-        { "ref",  referenceNo },
-        { "gallery", galleryName }
-    };
-    collection.InsertOne(document);
+    counter++;
+    ImageProcessor.ProcessImage(file, thumbnailsPath, counter);
 }
 
 // Retrieve Azure Storage connection string and container name from secrets
